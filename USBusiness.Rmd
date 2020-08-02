@@ -1,5 +1,5 @@
 ---
-title: "USBusinessReport"
+title: "US Economic Analysis"
 author: "Simone Trindade Steel"
 date: "02/08/2020"
 output: pdf_document
@@ -9,7 +9,7 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## US Business Report: an analysis of economic sentiment and new housing construction
+## An analysis of national economic sentiment effect on new housing offers
 
 ## 1. Introduction and executive summary
 
@@ -26,9 +26,15 @@ The main objective is to unveil whether or not there is an identifiable time lag
 
 By identifying a time lag between stimulus and result, investment in construction could be self-regulated to avoid large oscillation in supply, which may contribute to distortions in the market, such as the so-called "housing bubbles".
 
+This report will cover the exploration and preparation of data, the construction of alternative predictive models, and the results analysis leading to the report conclusion.
 
+```{r set-up, include=FALSE, warning=FALSE, message=FALSE}
+##########################
+# 
+# Preparing the environment:packages, libraries and data files
+#
+##########################
 
-```{r set-up, include=FALSE}
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
@@ -79,53 +85,55 @@ This report includes the analysis of several values for time lag, aiming to dete
 Another dimension of analysis is region within the United States. This is to verify the hypothesis that regional differences in dominant industries and variations in economic cycles lead to different behaviour towards real estate investment.
 
 In summary:
+
 a. This report uses the standard mechanism for randomly splitting the training and test sets using probability of 0.9 and 0.1, respectively.
+
 b. The outcome of the prediction will be categorical: 1 representing above average housing offers for the region and 0 representing below average.
+
 c. Overall accuracy was chosen as the best method for measuring success of the predictive model, i.e. maximising the proportion of correct predictions on the test set.  
-d. The objectives are to identify (a) the time lag between economic indicators and housing offers and (b) the best performing predictive model or ensemble of models that maximises overall accuracy.
+
+d. The objectives are to identify (1) the time lag between economic indicators and housing offers and (2) the best performing predictive model or ensemble of models that maximises overall accuracy.
+
+
 
 ## 2.2. Understanding the data
+
 
 The original dataset has many economic factors that will not be used in this study.
 
 The time series that are relevant to the subject of this report are:
+
 a. The macroeconomic indicators (named "Financial Reports") and 
+
 b. The new housing indicators (named "New Home Sales", "New Residential Construction").
 
-All dates indicate the begining of the analysis period, and they have been used to align the time series into quarterly periods - January, April, July and October.
+The metadata file for these two subjects provide the time series code to access the available data:
 
-The graphs below summarise the US national totals, and show the disruption created by the 2008 crisis. Following the crisis, revenue resumed its upwards trajectory, as seen with broader economic recovery. 
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 
-The analysis will also consider variations of revenue generation per industry, as these also exhibit geographic characteristics.
 
-The regional graphs, however, show that new housing construction and offering vary along each individual regional average that appears not related to the broader revenue generation at national level.
-
-In order to understand what drives an increase and decrease of new housing, this analysis will categorise above average new housing offers as 1, and below average as 0, relative to each regional average.
-
-The structure and sample data below shows the relevant metadata used in this study. For ease of reference, the script is commented as "Understanding and preparing data" in the Report.R file.
-
-```{r analysis, include=FALSE}
 # What time series are used for new home sales and housing under construction indicators? 
 housing_cat <- md_df %>% 
   filter((report=="New Residential Construction" | report=="New Home Sales"), 
          dt_code=="TOTAL",
          is_adj==0)
-str(housing_cat)
+
+housing_cat %>% group_by(report) %>% summarise (number_of_timeseries=n()) %>% knitr::kable() 
 
 # What time series are used for value creation in the financial reports (sales, revenue)? 
 finance_cat <- md_df %>% 
   filter(report=="Quarterly Financial Report", 
          dt_code=="101",
          is_adj==0)
-str(finance_cat)
 
-
-
-# Loading the relevant time series for analysis
+finance_cat %>% group_by(report) %>% summarise (number_of_timeseries=n()) %>% knitr::kable() 
 
 # All activity related to new dwellings, as a proxy for expected regional demand for housing
 housing_dat <- df %>% filter(time_series_code %in% housing_cat$time_series_code)
-head(housing_dat)
+
+print("First 10 rows of relevant Housing Data")
+head(housing_dat, 10) %>% knitr::kable()
+print(c("Total rows for Housing Data: ", nrow(housing_dat)))
 
 # All sales and revenue at national level, keeping all the aggregated numbers per industry (category_level=0)
 finance_cat <- finance_cat %>% filter(category_level==0)
@@ -133,7 +141,21 @@ finance_dat <- df %>% filter(time_series_code %in% finance_cat$time_series_code)
 # Separate industry category as a column
 finance_dat <- finance_dat %>% mutate(industry = str_trunc(time_series_code, 3, side="right", ellipsis=""))
 finance_dat <- finance_dat %>% mutate(industry = as.factor(industry))
-head(finance_dat)
+
+print("First 10 rows of relevant Financial Data")
+head(finance_dat, 10) %>% knitr::kable()
+print(c("Total rows for Financial Data: ", nrow(finance_dat)))
+
+```
+
+
+All dates indicate the beginning of the analysis period, and they have been used to align the time series into quarterly periods - January, April, July and October.
+
+
+```{r analysis, include=FALSE, warning=FALSE, message=FALSE}
+
+
+# Loading the relevant time series for analysis
 
 # Trimming the housing time series according to available financial data
 housing_dat <- housing_dat %>% filter(date>=min(finance_dat$date) & date<=max(finance_dat$date))
@@ -168,11 +190,17 @@ housing_dat <- housing_dat %>% group_by(date, region) %>% summarise(value=sum(va
 housing_dat_total <- data.frame(housing_dat)
 str(housing_dat_total)
 
-# Visualising the effects of National value generation on the anticipation of housing demand (i.e. new build) regionally.
 
 ```
 
-```{r analysis-graphs, echo=FALSE}
+The graphs below summarise the US national totals, and show the disruption created by the 2008 crisis. Following the crisis, revenue resumed its upwards trajectory, as seen with broader economic recovery. 
+
+
+```{r analysis2008-graphs, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Visualising the effects of National value generation on the anticipation of housing demand (i.e. new build) regionally.
+
+
 # Firstly, the 2008 housing market shock is clearly visible in both the financial and housing data
 graph_fin <- finance_dat %>% group_by(date) %>% summarise(value_generated=sum(value)) %>% 
   ggplot(aes(x=date, y=value_generated)) + 
@@ -192,18 +220,29 @@ graph_h_us <- housing_dat_total %>% filter(region=="US") %>%
    geom_vline(xintercept=date("2008-09-15"), colour="red")
 graph_h_us
 
-# Looking closer at each region, the volatility in the South is far greater than the other regions.
+```
+
+
+The regional graphs, however, show that new housing construction and offering vary along each individual regional average that appears not related to the broader revenue generation at national level.
+
+Looking closer at each region, the house offer variability in the South is far greater than the other regions. The Northeast is stable relatively to the national income fluctuations.
+
+```{r analysisregion-graphs, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Looking closer at each region, the house offer variability in the South is far greater than the other regions.
 # The Northeast is stable relatively to the national income fluctuations.
 graph_h_reg <- housing_dat_total %>% filter(region!="US") %>% 
   group_by(region, date) %>% summarise(new_builds=sum(value)) %>% 
   ggplot(aes(x=date, y=new_builds, colour=region)) + 
   ylab("Thousands of new housing units") +
   ggtitle("Total per region from Q4/2000 to Q1/2017") +
-  geom_smooth() #geom_point() #+ facet_grid(region ~ .)
+  geom_line() 
 graph_h_reg
 
-
 ```
+
+
+In order to understand what drives an increase and decrease of new housing, this analysis will categorise new housing offers above average as 1, and below average as 0, relative to each regional average.
 
 
 ## 2.3. Preparing data for analysis
@@ -221,9 +260,10 @@ Several steps are performed here:
 Industry codes are:
 
 
-```{r preparing-data, echo=FALSE}
+```{r preparing-data, echo=FALSE, warning=FALSE, message=FALSE}
 
 # Industry codes and description
+print("Industry codes and description")
 finance_cat %>% select(Code=cat_code, Description=cat_desc) %>% knitr::kable()
 
 # Adding a time lag in years (1, 2, 3, 5, 8, 13) between sentiment of growth (sales, revenue) and new house activity
@@ -234,7 +274,10 @@ finance_dat <- finance_dat %>% mutate(lag_1y = as_date(paste(as.character(year(d
                                       lag_5y = as_date(paste(as.character(year(date)+5), as.character(month(date)),as.character(day(date)), sep="-")),
                                       lag_8y = as_date(paste(as.character(year(date)+8), as.character(month(date)),as.character(day(date)), sep="-")),
                                       lag_13y = as_date(paste(as.character(year(date)+13), as.character(month(date)),as.character(day(date)), sep="-")))
-head(finance_dat)
+
+
+print("First 10 rows of relevant Financial Data, with extra columns representing time lag")
+head(finance_dat, 10)
 
 # Matrix for prediction, aligning all values by quarter: 
 # anchoring the year of housing offer and bringing in financial results according to time lag.
@@ -272,6 +315,7 @@ temp <- temp %>% mutate(nat_income_M_13y = value) %>%
 # Removing rows that have no industry-level information
 temp <- temp %>% filter(!is.na(industry))
 
+print("Number of data points available by industry when the different time lags were introduced")
 temp %>% group_by(industry) %>% summarise(sum1y = sum(!is.na(nat_income_M_1y)),
                                           sum2y = sum(!is.na(nat_income_M_2y)),
                                           sum3y = sum(!is.na(nat_income_M_3y)),
@@ -279,18 +323,36 @@ temp %>% group_by(industry) %>% summarise(sum1y = sum(!is.na(nat_income_M_1y)),
                                           sum8y = sum(!is.na(nat_income_M_8y)),
                                           sum13y = sum(!is.na(nat_income_M_13y))) %>% knitr::kable()
 
-# This shows that there are no data points for 8- and 13-year lag for Information and Professional and Technical services.
-# Therefore, 8- and 13-year lag will not be considered in the building of predictive models.
 
 # Removing all US housing totals because the analysis is regional only
 dataset <- temp %>% filter(region!="US")
 rm(temp)
 
-# Pre 2008 (darker shades), construction was higher in the South and West regions.
+```
+
+Now that the datasets are aligned in quarterly periods and by each of the hypothesis of time lag, the following graphs show some interesting relationships that will inform choices for model-based predictions.
+
+Each graph is organised to show the relationship between income (x axis) and new building activity (y axis), in vertical facets for each region and horizontal facets by industry. The shades in the graph represent time in calendar years.
+
+When looking at the same point in time, pre-2008 (darker shades) data shows new housing activity was higher in the South and West regions. But over time, it seems negatively influenced by income. 
+
+Does this support the notion of a time lag between income from sales and revenue rising and new housing activity occurring?
+
+The graphs also show (just as the table above) that there are no data points for 8- and 13-year lag for Information and Professional and Technical services, as these are relatively new industries from the point of view of census records. Due to the lack of significant amount of data, 8- and 13-year lag will not be considered in the building of predictive models.
+
+
+```{r visualising-data, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Pre-2008 (darker shades), new housing activity was higher in the South and West regions.
 # But over time, it seems negatively influenced by income, especially in the Mining industry
+# This shows that there are no data points for 8- and 13-year lag for Information and Professional and Technical services.
+# Therefore, 8- and 13-year lag will not be considered in the building of predictive models.
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_1y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 1 year income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -299,6 +361,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_2y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 2 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -307,6 +372,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_3y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 3 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -317,6 +385,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_5y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 5 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -326,6 +397,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_8y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 8 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -334,6 +408,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_13y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 13 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -344,9 +421,13 @@ dataset <- dataset %>% dplyr::select(date, region, industry, new_houses_K,
                                      nat_income_M_1y, nat_income_M_2y, nat_income_M_3y, nat_income_M_5y)
 
 
+```
+
+Given that there are considerable differences in new housing per region, the trend will be added to the dataset relative to regional means.
+
+```{r trend, echo=FALSE, warning=FALSE, message=FALSE}
+
 ###################
-# There aren't sufficient data points across all industries to enable 8 and 13-year lag analysis across all industries.
-# This study will focus on Manufacturing, Mining, Retail and Wholesale to ensure timeseries consistency.
 # Considerable differences in construction output per region will require the analysis to be centred on regional means
 ###################
 
@@ -357,6 +438,8 @@ dataset <- inner_join(dataset, housing_avg, by="region")
 # Trend = 0 meaning negative, if fewer new houses than average are predicted
 
 dataset <- dataset %>% mutate(trend=as.factor(ifelse(new_houses_K>=avg,1,0)))
+
+print("First 10 rows showing the addition of Trend (0 or 1) to the dataset for each region")
 head(dataset)
 
 
@@ -371,11 +454,12 @@ the sentiment of a positive economic position, as observed by financial reports 
 In order to do that, the concept of positive or negative trend was introduced. Positive trend means
 that regional construction is above historical average, and negative trend means below average.
 
-The models that appeared most appropriate for this exercise were GLM, KNN and Random Forest.
+The models that appeared most appropriate for this exercise were GLM, KNN and Random Forest. An ensemble of models was also introduced to verify if it could improve on the predictions of individual models.
 
-The ensemble of those models did not improve on the prediction made via Random Forest.
+As mentioned at the beginning of this report, the dataset for training the models and testing them was randomly split from the original with probability of 0.9 and 0.1, respectively. Each of the models was fit and tested for time lags of 1, 2, 3 and 5 years.
 
-```{r prediction, include=FALSE}
+
+```{r prediction, include=FALSE, warning=FALSE, message=FALSE}
 
 # Splitting training and test datasets
 
@@ -435,9 +519,10 @@ res <- sapply(lag, function(i) {
       factor(levels = levels(test_ds_clean$trend))
     F_meas(data = y_hat, reference = test_ds_clean$trend)
   })
-#  plot(ks, F_1)
   max(F_1)
   k_max <- ks[which.max(F_1)]
+  print(paste("For time lag =", i, "year(s), the optimal k parameter for KNN =",k_max, sep=" "))
+  plot(ks, F_1)
   fit <- knn3(y ~ ., data = x, k= k_max)
   y_hat_KNN <- predict(fit, test_ds_clean, type = "class")
   y_hat <- y_hat_KNN
@@ -459,21 +544,24 @@ res <- sapply(lag, function(i) {
   res <- rbind(res, data.frame(Model=paste("Ensemble",i, "year_lag", sep="_"), Accuracy=acc))
   
   # Table with combined results of models for all time lags  
-  res %>% knitr::kable()
+  # res %>% knitr::kable()
   pull(res)
 }) 
 
 ```
 
 ## 3. Results
-Optimal Time lag
-Comparison of predictive models
-Ensemble result
 
-```{r diplay-predictions, echo=FALSE}
-as.data.table(res)
+The maximum accuracy of 0.839 was obtained by the KNN model with k=4 and a time lag of 5 years between income and new housing activity.
+
+The accuracy of each model and time lag combination were gathered during the execution of the R script and are displayed below as a table and a plot graph. 
+
+```{r diplay-predictions, echo=FALSE, warning=FALSE, message=FALSE}
+
 colnames(res) <- c("1_year_lag","2_year_lag","3_year_lag","5_year_lag")
 rownames(res) <- c("GLM", "RandomForest","KNN", "Ensemble")
+
+print("Accuracy results of predictive models built and tested in this report")
 res %>% knitr::kable()
 
 graph_results <- as.data.frame(res) %>% 
@@ -488,10 +576,18 @@ graph_results
 
 ## 4. Conclusion
 
-This report shows that a predictive model can be used to determine the volume, relative to the regional average, of new houses that will be offered x years later based on the economic outlook in the United States. This may have useful applications for investors and policy makers to prevent over and under investment, which can have damaging effects in the economy because of the illiquid nature of real estate assets.
+This report shows that a predictive model can be used to determine the volume, relative to the regional average, of new houses that will be offered 5 years later based on the economic outlook in the United States. The models were built to take into account regional and industry differences and the best performing one was able to produce a maximum accuracy 0.839.
 
-There is a reasonably high predictive power of house construction by US Region based on a 5-year lag with regards of financial performance of each industry. The maximum accuracy obtained with the K-Nearest Neighbour (KNN, with k=5) model was 0.839.
+Although accuracy is not particularly high, this may still have useful applications for investors and policy makers to prevent over and under investment, which can have damaging effects in the economy because of the illiquid nature of real estate assets.
 
-As with any macroeconomic analysis, the inter-dependencies and correlations between indicators are complex and were not fully explored in this report. This is clearly a limitation of this analysis. Another limitation is the relatively small number of data points available, notably for recently developed industries such as Information, Professional and Technology Services sector. 
+This report has several limitations, notably:
 
-Future studies based on this approach could enrich the understanding between perception of prosperity and attitude towards real estate investment, such as tax structure changes and specific cyclical nature of each industry.
+(a) As with any macroeconomic analysis, the inter-dependencies and correlations between indicators are complex and were not fully explored in this report.
+
+(b) There is a relatively small number of data points available, especially for recently developed industries such as Information, Professional and Technical Services sectors.
+
+(c) Other predictive models and techniques not explored in this report may yield better accuracy results.
+
+
+Future studies based on this approach could enrich the understanding between perception of prosperity and attitude towards real estate investment, such as tax structure changes, specific cyclical nature of each industry and internal migration of workforce.
+
