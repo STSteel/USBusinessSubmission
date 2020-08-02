@@ -7,14 +7,11 @@
 
 # The source of data is https://www.kaggle.com/census/business-and-industry-reports
 
-# Understanding the data
-# The original dataset has many economic factors that will not be used in this study.
-# The time series that are relevant to the subject of this report are the 
-# macroeconomic indicators (Financial Reports) and the new housing indicators 
-# (New Home Sales, New Residential Construction)
-# As all dates indicate the begining of the analysis period, they have been used to align 
-# the time series into quarterly periods.
+##########################
+# 
+# Preparing the environment:packages, libraries and data files
 #
+##########################
 
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
@@ -53,27 +50,40 @@ md_df <- as.data.frame(md)
 # Remove temporary variables
 rm(md, data, temp)
 
+##########################
+# 
+# Understanding and preparing the data:
+# The original dataset has many economic factors that will not be used in this study.
+# The time series that are relevant to the subject of this report are the 
+# macroeconomic indicators (Financial Reports) and the new housing indicators 
+# (New Home Sales, New Residential Construction)
+# As all dates indicate the beginning of the analysis period, they have been used to align 
+# the time series into quarterly periods.
+#
+##########################
+
 # What time series are used for new home sales and housing under construction indicators? 
 housing_cat <- md_df %>% 
   filter((report=="New Residential Construction" | report=="New Home Sales"), 
          dt_code=="TOTAL",
          is_adj==0)
-str(housing_cat)
+
+housing_cat %>% group_by(report) %>% summarise (number_of_timeseries=n()) %>% knitr::kable() 
 
 # What time series are used for value creation in the financial reports (sales, revenue)? 
 finance_cat <- md_df %>% 
   filter(report=="Quarterly Financial Report", 
          dt_code=="101",
          is_adj==0)
-str(finance_cat)
 
-
-
-# Loading the relevant time series for analysis
+finance_cat %>% group_by(report) %>% summarise (number_of_timeseries=n()) %>% knitr::kable() 
 
 # All activity related to new dwellings, as a proxy for expected regional demand for housing
 housing_dat <- df %>% filter(time_series_code %in% housing_cat$time_series_code)
-head(housing_dat)
+
+print("First 10 rows of relevant Housing Data")
+head(housing_dat, 10) %>% knitr::kable()
+print(c("Total rows for Housing Data: ", nrow(housing_dat)))
 
 # All sales and revenue at national level, keeping all the aggregated numbers per industry (category_level=0)
 finance_cat <- finance_cat %>% filter(category_level==0)
@@ -81,7 +91,10 @@ finance_dat <- df %>% filter(time_series_code %in% finance_cat$time_series_code)
 # Separate industry category as a column
 finance_dat <- finance_dat %>% mutate(industry = str_trunc(time_series_code, 3, side="right", ellipsis=""))
 finance_dat <- finance_dat %>% mutate(industry = as.factor(industry))
-head(finance_dat)
+
+print("First 10 rows of relevant Financial Data")
+head(finance_dat, 10) %>% knitr::kable()
+print(c("Total rows for Financial Data: ", nrow(finance_dat)))
 
 # Trimming the housing time series according to available financial data
 housing_dat <- housing_dat %>% filter(date>=min(finance_dat$date) & date<=max(finance_dat$date))
@@ -137,18 +150,19 @@ graph_h_us <- housing_dat_total %>% filter(region=="US") %>%
    geom_vline(xintercept=date("2008-09-15"), colour="red")
 graph_h_us
 
-# Looking closer at each region, the volatility in the South is far greater than the other regions.
+# Looking closer at each region, the house offer variability in the South is far greater than the other regions.
 # The Northeast is stable relatively to the national income fluctuations.
 graph_h_reg <- housing_dat_total %>% filter(region!="US") %>% 
   group_by(region, date) %>% summarise(new_builds=sum(value)) %>% 
   ggplot(aes(x=date, y=new_builds, colour=region)) + 
   ylab("Thousands of new housing units") +
   ggtitle("Total per region from Q4/2000 to Q1/2017") +
-  geom_smooth() #geom_point() #+ facet_grid(region ~ .)
+  geom_line()
 graph_h_reg
 
 
 # Industry codes and description
+print("Industry codes and description")
 finance_cat %>% select(Code=cat_code, Description=cat_desc) %>% knitr::kable()
 
 # Adding a time lag in years (1, 2, 3, 5, 8, 13) between sentiment of growth (sales, revenue) and new house activity
@@ -159,7 +173,10 @@ finance_dat <- finance_dat %>% mutate(lag_1y = as_date(paste(as.character(year(d
                                       lag_5y = as_date(paste(as.character(year(date)+5), as.character(month(date)),as.character(day(date)), sep="-")),
                                       lag_8y = as_date(paste(as.character(year(date)+8), as.character(month(date)),as.character(day(date)), sep="-")),
                                       lag_13y = as_date(paste(as.character(year(date)+13), as.character(month(date)),as.character(day(date)), sep="-")))
-head(finance_dat)
+
+
+print("First 10 rows of relevant Financial Data, with extra columns representing time lag")
+head(finance_dat, 10)
 
 # Matrix for prediction, aligning all values by quarter: 
 # anchoring the year of housing offer and bringing in financial results according to time lag.
@@ -197,6 +214,7 @@ temp <- temp %>% mutate(nat_income_M_13y = value) %>%
 # Removing rows that have no industry-level information
 temp <- temp %>% filter(!is.na(industry))
 
+print("Number of data points available when the different time lags were introduced")
 temp %>% group_by(industry) %>% summarise(sum1y = sum(!is.na(nat_income_M_1y)),
                                           sum2y = sum(!is.na(nat_income_M_2y)),
                                           sum3y = sum(!is.na(nat_income_M_3y)),
@@ -204,18 +222,21 @@ temp %>% group_by(industry) %>% summarise(sum1y = sum(!is.na(nat_income_M_1y)),
                                           sum8y = sum(!is.na(nat_income_M_8y)),
                                           sum13y = sum(!is.na(nat_income_M_13y))) %>% knitr::kable()
 
-# This shows that there are no data points for 8- and 13-year lag for Information and Professional and Technical services.
-# Therefore, 8- and 13-year lag will not be considered in the building of predictive models.
 
 # Removing all US housing totals because the analysis is regional only
 dataset <- temp %>% filter(region!="US")
 rm(temp)
 
+# This shows that there are no data points for 8- and 13-year lag for Information and Professional and Technical services.
+# Therefore, 8- and 13-year lag will not be considered in the building of predictive models.
 # Pre 2008 (darker shades), construction was higher in the South and West regions.
 # But over time, it seems negatively influenced by income, especially in the Mining industry
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_1y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 1 year income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -224,6 +245,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_2y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 2 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -232,6 +256,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_3y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 3 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -242,6 +269,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_5y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 5 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -251,6 +281,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_8y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 8 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -259,6 +292,9 @@ dataset %>%
 
 dataset %>% 
   ggplot(aes(x=log10(nat_income_M_13y), y=new_houses_K, colour=year(date))) + 
+  theme(axis.text = element_text(size = 8))  +
+  theme(axis.title = element_text(size = 10))  +
+  theme(text = element_text(size = 8))  +
   xlab("Sales and Revenue in USD Millions (log10), with 13 years income lag") +
   ylab("New Housing in Thousands of Units") +
   ggtitle("Revenue and New Housing, per region and industry") +
@@ -270,8 +306,6 @@ dataset <- dataset %>% dplyr::select(date, region, industry, new_houses_K,
 
 
 ###################
-# There aren't sufficient data points across all industries to enable 8 and 13-year lag analysis across all industries.
-# This study will focus on Manufacturing, Mining, Retail and Wholesale to ensure timeseries consistency.
 # Considerable differences in construction output per region will require the analysis to be centred on regional means
 ###################
 
@@ -282,6 +316,8 @@ dataset <- inner_join(dataset, housing_avg, by="region")
 # Trend = 0 meaning negative, if fewer new houses than average are predicted
 
 dataset <- dataset %>% mutate(trend=as.factor(ifelse(new_houses_K>=avg,1,0)))
+
+print("First 10 rows showing the addition of Trend (0 or 1) to the dataset for each region")
 head(dataset)
 
 # Splitting training and test datasets
@@ -342,9 +378,10 @@ res <- sapply(lag, function(i) {
       factor(levels = levels(test_ds_clean$trend))
     F_meas(data = y_hat, reference = test_ds_clean$trend)
   })
-#  plot(ks, F_1)
   max(F_1)
   k_max <- ks[which.max(F_1)]
+  print(paste("For time lag =", i, "year(s), the optimal k parameter for KNN =",k_max, sep=" "))
+  plot(ks, F_1)
   fit <- knn3(y ~ ., data = x, k= k_max)
   y_hat_KNN <- predict(fit, test_ds_clean, type = "class")
   y_hat <- y_hat_KNN
@@ -366,13 +403,14 @@ res <- sapply(lag, function(i) {
   res <- rbind(res, data.frame(Model=paste("Ensemble",i, "year_lag", sep="_"), Accuracy=acc))
   
   # Table with combined results of models for all time lags  
-  res %>% knitr::kable()
+  # res %>% knitr::kable()
   pull(res)
 }) 
 
-as.data.table(res)
 colnames(res) <- c("1_year_lag","2_year_lag","3_year_lag","5_year_lag")
 rownames(res) <- c("GLM", "RandomForest","KNN", "Ensemble")
+
+print("Accuracy results of predictive models built and tested in this report")
 res %>% knitr::kable()
 
 graph_results <- as.data.frame(res) %>% 
